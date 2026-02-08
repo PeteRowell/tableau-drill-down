@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest manifest-version="0.1" xmlns="http://www.tableau.com/xml/extension_manifest">
+  <worksheet-extension id="com.example.hierarchical.crosstab" extension-version="1.0.0">
+    <default-locale>en_US</default-locale>
+    <name resource-id="name"/>
+    <description>Hierarchical Drill-Down Crosstab Extension</description>
+    <author name="Your Name" email="your.email@example.com" organization="Your Organization" website="https://yourusername.github.io"/>
+    <min-api-version>1.10</min-api-version>
+    <source-location>
+      <url>https://peterowell.github.io/tableau-drill-down/hierarchical-crosstab-diagnostic.html</url>
+    </source-location>
+    <icon></icon>
+    <permissions>
+      <permission>full data</permission>
+    </permissions>
+  </worksheet-extension>
+  <resources>
+    <resource id="name">
+      <text locale="en_US">Hierarchical Drill-Down Crosstab</text>
+    </resource>
+  </resources>
+</manifest>
