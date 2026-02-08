@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hierarchical Drill-Down Crosstab - Diagnostic</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 14px;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .diagnostic {
+            background: white;
+            border: 2px solid #0066cc;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .diagnostic h2 {
+            color: #0066cc;
+            margin-bottom: 15px;
+        }
+
+        .log-entry {
+            padding: 8px;
+            margin: 4px 0;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .log-info {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+        }
+
+        .log-success {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+        }
+
+        .log-error {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+
+        .log-warning {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+        }
+
+        #loading {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 20px;
+            background: #fff;
+            border-radius: 8px;
+            border: 2px solid #ccc;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #0066cc;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #container {
+            display: none;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+
+        .status.success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .status.error {
+            background: #f44336;
+            color: white;
+        }
+
+        .crosstab {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            margin-top: 20px;
+        }
+
+        .crosstab thead th {
+            background: #f0f0f0;
+            padding: 12px;
+            text-align: left;
+            border-bottom: 2px solid #ddd;
+            font-weight: 600;
+        }
+
+        .crosstab tbody td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .crosstab tbody tr:hover {
+            background: #f9f9f9;
+        }
+
+        .crosstab tbody td.row-header {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .crosstab tbody td.measure-cell {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .row-content {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .expand-icon {
+            display: inline-flex;
+            width: 16px;
+            transition: transform 0.2s;
+        }
+
+        .expand-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .expand-icon.hidden {
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="diagnostic">
+        <h2>🔍 Extension Diagnostic Mode</h2>
+        <div id="status"></div>
+        <div id="logs"></div>
+    </div>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <span>Initializing extension...</span>
+    </div>
+
+    <div id="container">
+        <table class="crosstab" id="crosstab"></table>
+    </div>
+
+    <script>
+        // Diagnostic logging
+        const logsDiv = document.getElementById('logs');
+        const statusDiv = document.getElementById('status');
+
+        function log(message, type = 'info') {
+            console.log(`[${type.toUpperCase()}] ${message}`);
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logsDiv.appendChild(entry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+
+        function setStatus(message, type = 'info') {
+            statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        // Load Tableau Extensions API
+        log('🔄 Loading Tableau Extensions API...', 'info');
+        
+        const scriptUrls = [
+            '../Extensions/tableau.extensions.1.latest.js',
+            '../../Extensions/tableau.extensions.1.latest.js',
+            'https://unpkg.com/@tableau/extensions-api-types@1.10.0/tableau.extensions.1.latest.js'
+        ];
+
+        let scriptIndex = 0;
+
+        function loadScript() {
+            if (scriptIndex >= scriptUrls.length) {
+                log('❌ Failed to load Tableau Extensions API from all sources', 'error');
+                setStatus('❌ Could not load Tableau Extensions API', 'error');
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = scriptUrls[scriptIndex];
+            
+            script.onload = function() {
+                log(`✅ Loaded API from: ${scriptUrls[scriptIndex]}`, 'success');
+                initializeExtension();
+            };
+            
+            script.onerror = function() {
+                log(`⚠️ Failed to load from: ${scriptUrls[scriptIndex]}`, 'warning');
+                scriptIndex++;
+                loadScript();
+            };
+
+            document.head.appendChild(script);
+        }
+
+        loadScript();
+
+        function initializeExtension() {
+        function initializeExtension() {
+        log('🚀 Extension page loaded', 'info');
+        log('Current URL: ' + window.location.href, 'info');
+
+        // Check if Tableau API is available
+        if (typeof tableau === 'undefined') {
+            log('❌ ERROR: tableau object is undefined', 'error');
+            setStatus('❌ Tableau Extensions API not found!', 'error');
+        } else {
+            log('✅ tableau object found', 'success');
+            
+            if (!tableau.extensions) {
+                log('❌ ERROR: tableau.extensions is undefined', 'error');
+                setStatus('❌ tableau.extensions not available!', 'error');
+            } else {
+                log('✅ tableau.extensions found', 'success');
+                
+                // Try to initialize
+                log('🔄 Calling tableau.extensions.initializeAsync()...', 'info');
+                setStatus('🔄 Initializing Tableau Extensions API...', 'info');
+                
+                tableau.extensions.initializeAsync().then(() => {
+                    log('✅ SUCCESS: Extension initialized!', 'success');
+                    setStatus('✅ Extension initialized successfully!', 'success');
+                    
+                    // Log extension info
+                    log('Extension version: ' + tableau.extensions.environment.tableauVersion, 'info');
+                    log('API version: ' + tableau.extensions.environment.apiVersion, 'info');
+                    
+                    // Try to load data
+                    loadData();
+                    
+                }).catch(err => {
+                    log('❌ INITIALIZATION ERROR: ' + err.message, 'error');
+                    log('Error details: ' + JSON.stringify(err), 'error');
+                    if (err.stack) {
+                        log('Stack trace: ' + err.stack, 'error');
+                    }
+                    setStatus('❌ Failed to initialize: ' + err.message, 'error');
+                });
+            }
+        }
+        }
+
+        // Global state
+        let worksheet = null;
+        let hierarchyFields = [];
+        let measureFields = [];
+        let fullDataTree = null;
+        let expandedNodes = new Set();
+
+        async function loadData() {
+            try {
+                log('📊 Starting data load...', 'info');
+
+                // Get worksheet
+                if (!tableau.extensions.worksheetContent) {
+                    log('❌ ERROR: worksheetContent not available', 'error');
+                    setStatus('❌ worksheetContent not available', 'error');
+                    return;
+                }
+
+                worksheet = tableau.extensions.worksheetContent.worksheet;
+                log('✅ Worksheet: ' + worksheet.name, 'success');
+
+                // Get data
+                log('📥 Requesting summary data...', 'info');
+                const dataTable = await worksheet.getSummaryDataReaderAsync();
+                log('✅ Data reader obtained', 'success');
+
+                const columns = dataTable.columns;
+                log('📋 Found ' + columns.length + ' columns', 'info');
+                
+                columns.forEach((col, idx) => {
+                    log(`  Column ${idx}: ${col.fieldName} (${col.dataType})`, 'info');
+                });
+
+                // Identify fields
+                identifyFieldTypes(columns);
+                log(`🔍 Hierarchy fields: ${hierarchyFields.length}`, 'info');
+                log(`🔍 Measure fields: ${measureFields.length}`, 'info');
+
+                if (hierarchyFields.length === 0) {
+                    log('❌ No hierarchy fields found!', 'error');
+                    setStatus('❌ No dimensions found in Rows', 'error');
+                    await dataTable.releaseAsync();
+                    return;
+                }
+
+                if (measureFields.length === 0) {
+                    log('❌ No measure fields found!', 'error');
+                    setStatus('❌ No measures found', 'error');
+                    await dataTable.releaseAsync();
+                    return;
+                }
+
+                // Read data
+                let allData = [];
+                let pageCount = 0;
+                for (let page of dataTable.pages) {
+                    allData = allData.concat(page.data);
+                    pageCount++;
+                }
+                await dataTable.releaseAsync();
+
+                log(`✅ Loaded ${allData.length} rows from ${pageCount} pages`, 'success');
+
+                // Build tree
+                log('🌳 Building hierarchical tree...', 'info');
+                fullDataTree = buildHierarchicalTree(allData);
+                log('✅ Tree built with ' + Object.keys(fullDataTree).length + ' top nodes', 'success');
+
+                // Render
+                log('🎨 Rendering table...', 'info');
+                renderTable();
+                log('✅ Table rendered!', 'success');
+
+                // Show table
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('container').style.display = 'block';
+                setStatus('✅ Extension fully loaded and operational!', 'success');
+
+            } catch (err) {
+                log('❌ LOAD ERROR: ' + err.message, 'error');
+                log('Error details: ' + JSON.stringify(err), 'error');
+                if (err.stack) {
+                    log('Stack trace: ' + err.stack, 'error');
+                }
+                setStatus('❌ Error loading data: ' + err.message, 'error');
+            }
+        }
+
+        function identifyFieldTypes(columns) {
+            hierarchyFields = [];
+            measureFields = [];
+
+            columns.forEach(col => {
+                if (col.dataType === 'string' || col.dataType === 'date-time' || col.dataType === 'date') {
+                    hierarchyFields.push({
+                        index: col.index,
+                        fieldName: col.fieldName
+                    });
+                } else if (col.dataType === 'float' || col.dataType === 'int') {
+                    measureFields.push({
+                        index: col.index,
+                        fieldName: col.fieldName
+                    });
+                }
+            });
+        }
+
+        function buildHierarchicalTree(data) {
+            const tree = {};
+
+            data.forEach(row => {
+                let currentLevel = tree;
+
+                hierarchyFields.forEach((field, levelIndex) => {
+                    const value = row[field.index].value;
+                    
+                    if (value === null || value === undefined || value === '%null%') {
+                        return;
+                    }
+
+                    if (!currentLevel[value]) {
+                        currentLevel[value] = {
+                            name: value,
+                            level: levelIndex,
+                            measures: {},
+                            children: {},
+                            hasChildren: levelIndex < hierarchyFields.length - 1
+                        };
+                    }
+
+                    measureFields.forEach(measure => {
+                        const measureValue = row[measure.index].value;
+                        if (measureValue !== null && measureValue !== undefined) {
+                            currentLevel[value].measures[measure.fieldName] = measureValue;
+                        }
+                    });
+
+                    currentLevel = currentLevel[value].children;
+                });
+            });
+
+            return tree;
+        }
+
+        function renderTable() {
+            const table = document.getElementById('crosstab');
+            table.innerHTML = '';
+
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+
+            const hierarchyHeader = document.createElement('th');
+            hierarchyHeader.textContent = hierarchyFields[0].fieldName;
+            headerRow.appendChild(hierarchyHeader);
+
+            measureFields.forEach(measure => {
+                const th = document.createElement('th');
+                th.textContent = measure.fieldName;
+                headerRow.appendChild(th);
+            });
+
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            renderTreeLevel(fullDataTree, tbody, 0, []);
+            table.appendChild(tbody);
+        }
+
+        function renderTreeLevel(treeLevel, tbody, level, path) {
+            const sortedKeys = Object.keys(treeLevel).sort();
+
+            sortedKeys.forEach(key => {
+                const node = treeLevel[key];
+                const currentPath = [...path, key];
+                const pathKey = currentPath.join('|');
+
+                const row = document.createElement('tr');
+                row.setAttribute('data-level', level);
+                row.setAttribute('data-path', pathKey);
+                
+                const isExpanded = expandedNodes.has(pathKey);
+
+                const rowHeader = document.createElement('td');
+                rowHeader.className = 'row-header';
+                
+                const rowContent = document.createElement('div');
+                rowContent.className = 'row-content';
+
+                const indent = document.createElement('span');
+                indent.style.width = (level * 24) + 'px';
+                indent.style.display = 'inline-block';
+                rowContent.appendChild(indent);
+
+                if (node.hasChildren && Object.keys(node.children).length > 0) {
+                    const icon = document.createElement('span');
+                    icon.className = 'expand-icon' + (isExpanded ? ' expanded' : '');
+                    icon.innerHTML = '▸';
+                    rowContent.appendChild(icon);
+
+                    rowHeader.addEventListener('click', () => {
+                        toggleNode(currentPath);
+                    });
+                } else {
+                    const spacer = document.createElement('span');
+                    spacer.className = 'expand-icon hidden';
+                    spacer.innerHTML = '&nbsp;';
+                    rowContent.appendChild(spacer);
+                }
+
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = node.name;
+                rowContent.appendChild(nameSpan);
+
+                rowHeader.appendChild(rowContent);
+                row.appendChild(rowHeader);
+
+                measureFields.forEach(measure => {
+                    const cell = document.createElement('td');
+                    cell.className = 'measure-cell';
+                    const value = node.measures[measure.fieldName];
+                    if (value !== undefined && value !== null) {
+                        cell.textContent = formatNumber(value);
+                    } else {
+                        cell.textContent = '';
+                    }
+                    row.appendChild(cell);
+                });
+
+                tbody.appendChild(row);
+
+                if (isExpanded && node.hasChildren && Object.keys(node.children).length > 0) {
+                    renderTreeLevel(node.children, tbody, level + 1, currentPath);
+                }
+            });
+        }
+
+        function toggleNode(path) {
+            const pathKey = path.join('|');
+            
+            if (expandedNodes.has(pathKey)) {
+                const pathsToRemove = Array.from(expandedNodes).filter(p => 
+                    p === pathKey || p.startsWith(pathKey + '|')
+                );
+                pathsToRemove.forEach(p => expandedNodes.delete(p));
+            } else {
+                expandedNodes.add(pathKey);
+            }
+
+            renderTable();
+        }
+
+        function formatNumber(value) {
+            if (typeof value === 'number') {
+                if (Math.abs(value) >= 100) {
+                    return '$' + value.toLocaleString('en-US', {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 0
+                    });
+                } else {
+                    return value.toLocaleString('en-US', {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 2
+                    });
+                }
+            }
+            return value;
+        }
+    </script>
+</body>
+</html>
